@@ -1,0 +1,56 @@
+                     GNU AFFERO GENERAL PUBLIC LICENSE
+                        Version 3, 19 November 2007
+
+ Copyright (C) 2026 CuzTeam
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License as published
+ by the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
+
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+==============================================================================
+                           ADDITIONAL RESTRICTIONS
+==============================================================================
+
+The following additional restrictions apply to this software and supersede
+any conflicting terms in the GNU Affero General Public License:
+
+1. NON-COMMERCIAL USE ONLY
+   You may NOT use, distribute, modify, or create derivative works of this
+   software for any commercial purpose. "Commercial purpose" means any use
+   that is intended for or directed toward commercial advantage or monetary
+   compensation, including but not limited to:
+   - Selling, licensing, or sublicensing the software or any derivative work;
+   - Using the software to provide paid services, whether directly or
+     indirectly;
+   - Incorporating the software into a product or service offered for sale,
+     subscription, rent, or lease;
+   - Using the software in a business environment to support revenue-
+     generating activities.
+
+2. NO PROPRIETARY DERIVATIVES
+   Any derivative work, modification, or fork of this software must be
+   distributed under the same license terms, including this non-commercial
+   restriction, and its complete corresponding source code must be made
+   publicly available under the same terms.
+
+3. NETWORK USE
+   If you run a modified version of this software on a network server, you
+   must offer the complete corresponding source code to the users of that
+   server under the terms of this License, including this non-commercial
+   restriction.
+
+4. TERMINATION
+   Any violation of these additional restrictions automatically terminates
+   your rights under this License.
+
+For the full text of the GNU Affero General Public License v3.0, see
+<https://www.gnu.org/licenses/agpl-3.0.html>.
