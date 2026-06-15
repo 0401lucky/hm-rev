@@ -57,6 +57,14 @@ class UnsupportedRegionError(Exception):
     pass
 
 
+def build_login_url(port: int, client_secret: str) -> str:
+    """生成 DevEco OAuth 授权地址。"""
+    return (
+        f"{DEVECO_BASE_URL}/{DEVECO_AUTH_URL}"
+        f"?port={port}&appid={DEVECO_APP_ID}&code={client_secret}"
+    )
+
+
 def _parse_request(data: bytes) -> tuple[str, str, bytes]:
     """Parse a simple HTTP request; return (method, path, body)."""
     try:
@@ -118,7 +126,7 @@ async def _callback_handler(
         await writer.wait_closed()
         return
 
-    method, path, body = _parse_request(data)
+    _method, path, body = _parse_request(data)
     parsed = urlparse(path)
 
     if parsed.path != "/callback":
@@ -209,6 +217,10 @@ def _build_client(proxy: str | None = None, timeout: float = 30.0) -> httpx.Asyn
     )
 
 
+def make_login_secret() -> str:
+    return uuid.uuid4().hex.replace("-", "")
+
+
 def _parse_jwt(token: str) -> dict:
     parts = token.split(".")
     if len(parts) != 3:
@@ -248,13 +260,64 @@ def _save_access_token(access_token: str, refresh_token: str) -> None:
     save_auth_data(data)
 
 
+async def exchange_temp_token(temp_token: str, proxy: str | None = None) -> UserInfo:
+    """使用 OAuth 回调中的临时 token 换取并保存本地凭据。"""
+    actual_temp_token = temp_token.split("&")[0]
+
+    async with _build_client(proxy, timeout=30.0) as client:
+        jwt_resp = await client.get(
+            f"{DEVECO_BASE_URL}/{DEVECO_TEMP_TOKEN_CHECK_URL}",
+            params={
+                "tempToken": actual_temp_token,
+                "site": "CN",
+                "version": "1.0.0",
+                "appid": DEVECO_APP_ID,
+            },
+        )
+        if jwt_resp.status_code != 200:
+            raise RuntimeError(f"Failed to get JWT: {jwt_resp.status_code}")
+        jwt_token = jwt_resp.text.strip()
+        if len(jwt_token.split(".")) != 3:
+            raise ValueError("Invalid JWT format")
+
+        info_resp = await client.get(
+            f"{DEVECO_BASE_URL}/{DEVECO_JWT_TOKEN_CHECK_URL}",
+            headers={"refresh": "false", "jwtToken": jwt_token},
+        )
+        if info_resp.status_code != 200:
+            raise RuntimeError(f"Failed to check JWT: {info_resp.status_code}")
+        info_data = info_resp.json()
+        if not info_data.get("status") or not info_data.get("userInfo"):
+            raise ValueError("Invalid JWT userInfo")
+
+        user_info_raw = info_data["userInfo"]
+        payload = _parse_jwt(jwt_token)
+        user_info = UserInfo(
+            user_id=payload.get("userId", ""),
+            user_name=payload.get("userName", ""),
+            access_token=user_info_raw.get("accessToken", ""),
+            refresh_token=user_info_raw.get("refreshToken", ""),
+            jwt_token=jwt_token,
+            country_code="CN",
+            language="zh_CN",
+            is_real_name=user_info_raw.get("realName") == "true",
+        )
+
+        _save_token(jwt_token)
+        _save_access_token(user_info.access_token, user_info.refresh_token)
+
+        return user_info
+
+
 async def _start_callback_server(
     port: int, expected_code: str
 ) -> tuple[asyncio.Server, asyncio.Future]:
     loop = asyncio.get_running_loop()
     future: asyncio.Future = loop.create_future()
 
-    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def handler(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
         await _callback_handler(reader, writer, expected_code, future)
 
     server = await asyncio.start_server(handler, "127.0.0.1", port)
@@ -267,7 +330,7 @@ async def login(
     no_browser: bool = False,
     timeout: float = 600.0,
 ) -> LoginResult:
-    client_secret = uuid.uuid4().hex.replace("-", "")
+    client_secret = make_login_secret()
     ports = [DEVECO_DEFAULT_AUTH_PORT, 34567, 34568, 34569, 34570]
 
     server: asyncio.Server | None = None
@@ -283,64 +346,20 @@ async def login(
         return LoginResult(success=False, error="All local ports are in use")
 
     try:
-        login_url = (
-            f"{DEVECO_BASE_URL}/{DEVECO_AUTH_URL}"
-            f"?port={port}&appid={DEVECO_APP_ID}&code={client_secret}"
-        )
+        login_url = build_login_url(port, client_secret)
         if no_browser:
             print(f"Please open this URL in your browser to login:\n{login_url}")
         else:
             opened = await _open_browser(login_url)
             if not opened:
-                print(f"Failed to open browser automatically. Please open:\n{login_url}")
+                print(
+                    f"Failed to open browser automatically. Please open:\n{login_url}"
+                )
 
         result = await asyncio.wait_for(future, timeout=timeout)
         temp_token = result["tempToken"]
-        actual_temp_token = temp_token.split("&")[0]
-
-        async with _build_client(proxy, timeout=30.0) as client:
-            jwt_resp = await client.get(
-                f"{DEVECO_BASE_URL}/{DEVECO_TEMP_TOKEN_CHECK_URL}",
-                params={
-                    "tempToken": actual_temp_token,
-                    "site": "CN",
-                    "version": "1.0.0",
-                    "appid": DEVECO_APP_ID,
-                },
-            )
-            if jwt_resp.status_code != 200:
-                raise RuntimeError(f"Failed to get JWT: {jwt_resp.status_code}")
-            jwt_token = jwt_resp.text.strip()
-            if len(jwt_token.split(".")) != 3:
-                raise ValueError("Invalid JWT format")
-
-            info_resp = await client.get(
-                f"{DEVECO_BASE_URL}/{DEVECO_JWT_TOKEN_CHECK_URL}",
-                headers={"refresh": "false", "jwtToken": jwt_token},
-            )
-            if info_resp.status_code != 200:
-                raise RuntimeError(f"Failed to check JWT: {info_resp.status_code}")
-            info_data = info_resp.json()
-            if not info_data.get("status") or not info_data.get("userInfo"):
-                raise ValueError("Invalid JWT userInfo")
-
-            user_info_raw = info_data["userInfo"]
-            payload = _parse_jwt(jwt_token)
-            user_info = UserInfo(
-                user_id=payload.get("userId", ""),
-                user_name=payload.get("userName", ""),
-                access_token=user_info_raw.get("accessToken", ""),
-                refresh_token=user_info_raw.get("refreshToken", ""),
-                jwt_token=jwt_token,
-                country_code="CN",
-                language="zh_CN",
-                is_real_name=user_info_raw.get("realName") == "true",
-            )
-
-            _save_token(jwt_token)
-            _save_access_token(user_info.access_token, user_info.refresh_token)
-
-            return LoginResult(success=True, user_info=user_info)
+        user_info = await exchange_temp_token(temp_token, proxy=proxy)
+        return LoginResult(success=True, user_info=user_info)
     except asyncio.TimeoutError:
         return LoginResult(success=False, error="Login timeout")
     except LoginCancelledError:

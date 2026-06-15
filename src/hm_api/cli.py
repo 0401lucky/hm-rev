@@ -38,7 +38,9 @@ def login_cmd(
         console.print("[bold blue]Use the URL below to login:[/bold blue]")
     else:
         console.print("[bold blue]Opening browser for DevEco login...[/bold blue]")
-    result = asyncio.run(login(proxy=proxy, no_browser=no_browser or False, timeout=timeout or 600))
+    result = asyncio.run(
+        login(proxy=proxy, no_browser=no_browser or False, timeout=timeout or 600)
+    )
     if result.success and result.user_info:
         console.print(
             f"[bold green]Login successful![/bold green] Welcome, {result.user_info.user_name}"
@@ -57,37 +59,54 @@ def login_cmd(
 @app.command()
 def serve(
     host: Optional[str] = typer.Option(
-        DEFAULT_HOST, "--host", "-h", help="Host to bind the server"
+        DEFAULT_HOST, "--host", "-h", envvar="HM_HOST", help="Host to bind the server"
     ),
     port: Optional[int] = typer.Option(
-        DEFAULT_PORT, "--port", "-p", help="Port to bind the server", min=1, max=65535
+        DEFAULT_PORT,
+        "--port",
+        "-p",
+        envvar="HM_PORT",
+        help="Port to bind the server",
+        min=1,
+        max=65535,
     ),
     proxy: Optional[str] = typer.Option(
-        "", "--proxy", help="HTTP/HTTPS proxy for upstream requests"
+        "", "--proxy", envvar="HM_PROXY", help="HTTP/HTTPS proxy for upstream requests"
     ),
     key: Optional[str] = typer.Option(
-        None, "--key", "-k", help="API key for client authentication; omit to disable auth"
+        None,
+        "--key",
+        "-k",
+        envvar="HM_API_KEY",
+        help="API key for client authentication; omit to disable auth",
     ),
 ) -> None:
     """Start the OpenAI-compatible API server."""
     if not is_logged_in():
         console.print(
-            "[yellow]Not logged in. Run [bold]hm-api login[/bold] first.[/yellow]"
+            "[yellow]Not logged in. Open the web panel and authorize DevEco first.[/yellow]"
         )
-        raise typer.Exit(1)
+    else:
+        import asyncio
 
-    import asyncio
-
-    session = asyncio.run(load_session())
-    if session:
-        console.print(
-            f"[blue]Logged in as {session.get('user_name') or session.get('user_id')}.[/blue]"
-        )
+        session = asyncio.run(load_session())
+        if session:
+            console.print(
+                f"[blue]Logged in as {session.get('user_name') or session.get('user_id')}.[/blue]"
+            )
 
     proxy = _empty_as_none(proxy)
     key = _empty_as_none(key)
+    bind_host = host or DEFAULT_HOST
+    bind_port = port or DEFAULT_PORT
+    panel_host = "127.0.0.1" if bind_host in {"0.0.0.0", "::"} else bind_host
 
-    console.print(f"[bold green]Starting server at http://{host}:{port}[/bold green]")
+    console.print(
+        f"[bold green]Starting server at http://{bind_host}:{bind_port}[/bold green]"
+    )
+    console.print(
+        f"[bold green]Web panel at http://{panel_host}:{bind_port}[/bold green]"
+    )
     if key:
         console.print("[dim]API key authentication enabled.[/dim]")
     else:
@@ -95,7 +114,7 @@ def serve(
     if proxy:
         console.print(f"[dim]Upstream proxy: {proxy}[/dim]")
 
-    run_server(host=host or DEFAULT_HOST, port=port or DEFAULT_PORT, api_key=key, proxy=proxy)
+    run_server(host=bind_host, port=bind_port, api_key=key, proxy=proxy)
 
 
 @app.command()

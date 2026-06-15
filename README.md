@@ -20,6 +20,7 @@
 ## ✨ Features
 
 - **OpenAI-compatible** — `/v1/models` and `/v1/chat/completions`
+- **Web panel** — authorize DevEco login from the browser dashboard
 - **Streaming & non-streaming** — automatic SSE forwarding and `/no-stream` fallback
 - **Built-in auth** — optional `--key` API key protection
 - **Proxy support** — pass upstream HTTP/HTTPS proxy to `httpx`
@@ -38,14 +39,33 @@ cd hm-rev
 # 2. install dependencies (requires uv)
 uv sync
 
-# 3. login via DevEco OAuth
-uv run hm-api login
-
-# 4. serve the OpenAI-compatible API
+# 3. start the API and web panel
 uv run hm-api serve --host 0.0.0.0 --port 8000 --key your-secret-key
+
+# 4. open the web panel and authorize DevEco login
+# http://localhost:8000
 ```
 
 > If you prefer not to open the browser automatically, use `uv run hm-api login --no-browser` and follow the printed URL.
+
+---
+
+## 🐳 Docker
+
+```bash
+# Start with docker compose
+HM_API_KEY=your-secret-key docker compose up --build
+
+# Or build and run directly
+docker build -t hm-api .
+docker run --rm -p 8000:8000 -v hm-api-cred:/app/cred \
+  -e HM_API_KEY=your-secret-key hm-api
+```
+
+Open `http://localhost:8000`, then click `授权登录`.
+
+The OAuth callback uses the browser-visible port. If you map a different host
+port, such as `8080:8000`, open `http://localhost:8080` for login.
 
 ---
 
@@ -56,7 +76,7 @@ uv run hm-api serve --host 0.0.0.0 --port 8000 --key your-secret-key
 | Command | Description |
 |---------|-------------|
 | `hm-api login [--proxy PROXY] [--no-browser]` | Authenticate with DevEco Code |
-| `hm-api serve [--host HOST] [--port PORT] [--proxy PROXY] [--key KEY]` | Start the OpenAI-compatible proxy server |
+| `hm-api serve [--host HOST] [--port PORT] [--proxy PROXY] [--key KEY]` | Start the API server and web panel |
 | `hm-api status` | Show current login status |
 
 </div>
@@ -69,6 +89,8 @@ uv run hm-api serve --host 0.0.0.0 --port 8000 --key your-secret-key
 | `--port` | `8000` | Bind port |
 | `--proxy` | — | Upstream HTTP/HTTPS proxy |
 | `--key` | — | API key for client authentication (omit to disable) |
+
+`serve` also accepts `HM_HOST`, `HM_PORT`, `HM_PROXY`, and `HM_API_KEY`.
 
 ---
 
@@ -112,7 +134,10 @@ hm-rev/
 │   ├── server.py        # FastAPI OpenAI-compatible proxy
 │   ├── login.py         # DevEco OAuth login flow
 │   ├── crypto.py        # Credential encryption
-│   └── config.py        # Constants and defaults
+│   ├── config.py        # Constants and defaults
+│   └── web/             # Browser authorization panel
+├── Dockerfile           # Container image for API + panel
+├── docker-compose.yml   # Local Docker deployment
 ├── pyproject.toml       # Project metadata and dependencies
 ├── uv.lock              # Locked dependency tree
 ├── LICENSE              # AGPL-3.0 + Non-Commercial clause

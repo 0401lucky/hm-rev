@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hm-api 控制台</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script defer src="/assets/app.js"></script>
+</head>
+<body>
+  <div class="page-grid" aria-hidden="true"></div>
+
+  <main class="shell">
+    <header class="shell-header">
+      <div class="brand">
+        <div class="brand-mark">hm</div>
+        <div>
+          <p class="eyebrow">DevEco Code Gateway</p>
+          <h1>hm-api 控制台</h1>
+        </div>
+      </div>
+      <div id="statusPill" class="status-pill pending">
+        <span></span>
+        检测中
+      </div>
+    </header>
+
+    <section class="workspace" aria-label="控制台">
+      <article class="panel auth-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Authorization</p>
+            <h2>授权登录</h2>
+          </div>
+          <button id="refreshButton" class="icon-button" type="button" title="刷新状态">
+            <i data-lucide="refresh-cw"></i>
+          </button>
+        </div>
+
+        <div class="identity-block">
+          <div class="identity-icon">
+            <i data-lucide="shield-check"></i>
+          </div>
+          <div>
+            <span class="muted">当前账号</span>
+            <strong id="accountName">未授权</strong>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="proxyInput">上游代理</label>
+          <input id="proxyInput" type="url" placeholder="http://127.0.0.1:7890">
+        </div>
+
+        <div class="button-row">
+          <button id="loginButton" class="primary-button" type="button">
+            <i data-lucide="key-round"></i>
+            授权登录
+          </button>
+          <button id="copyEndpointButton" class="secondary-button" type="button">
+            <i data-lucide="copy"></i>
+            复制 API 地址
+          </button>
+        </div>
+      </article>
+
+      <article class="panel service-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Runtime</p>
+            <h2>服务状态</h2>
+          </div>
+          <div class="port-chip" id="portChip">--</div>
+        </div>
+
+        <dl class="status-list">
+          <div>
+            <dt>OpenAI 兼容接口</dt>
+            <dd id="endpointText">--</dd>
+          </div>
+          <div>
+            <dt>API Key</dt>
+            <dd id="keyStatus">检测中</dd>
+          </div>
+          <div>
+            <dt>登录凭据</dt>
+            <dd id="credentialStatus">检测中</dd>
+          </div>
+        </dl>
+
+        <div class="signal-strip" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
