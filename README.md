@@ -84,10 +84,19 @@ Add a persistent volume at:
 /app/cred
 ```
 
-The volume keeps encrypted credentials across restarts and redeploys. If DevEco
-OAuth redirects to a local callback that cannot be opened from Zeabur, copy the
-failed callback URL or only its `tempToken`, paste it into `回调 URL / tempToken`
-on the web panel, then click `导入授权`.
+The volume keeps encrypted credentials across restarts and redeploys.
+
+For cloud login, keep a local callback bridge running before clicking
+`授权登录` on the Zeabur web panel:
+
+```bash
+uv run hm-api bridge --target https://your-app.zeabur.app --port 8000
+```
+
+DevEco redirects OAuth callbacks to `localhost`. The bridge captures that local
+callback and forwards the token to your Zeabur service. If the failed callback
+URL contains `tempToken`, you can also paste it into `回调 URL / tempToken` and
+click `导入授权`.
 
 ---
 
@@ -99,6 +108,7 @@ on the web panel, then click `导入授权`.
 |---------|-------------|
 | `hm-api login [--proxy PROXY] [--no-browser]` | Authenticate with DevEco Code |
 | `hm-api serve [--host HOST] [--port PORT] [--proxy PROXY] [--key KEY]` | Start the API server and web panel |
+| `hm-api bridge --target URL [--port PORT]` | Forward local OAuth callback to a cloud deployment |
 | `hm-api status` | Show current login status |
 
 </div>

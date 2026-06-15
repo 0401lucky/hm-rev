@@ -28,7 +28,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -291,12 +292,78 @@ button svg {
   border-top: 1px solid var(--line);
 }
 
+.callback-hint {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 13px;
+  border: 1px solid #c6d8c8;
+  background: #f3f8f0;
+}
+
+.callback-hint.active {
+  border-color: #d7c17a;
+  background: #fff8df;
+}
+
+.callback-hint svg {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  color: var(--green);
+}
+
+.callback-hint.active svg {
+  color: var(--yellow);
+}
+
+.callback-hint strong,
+.callback-hint span {
+  display: block;
+}
+
+.callback-hint strong {
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.callback-hint span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bridge-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.bridge-command code {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  background: #fbfcf8;
+  padding: 0 12px;
+  color: var(--ink);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .manual-import .field {
   margin-bottom: 12px;
 }
 
-.wide-button {
-  width: 100%;
+.manual-button-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
 }
 
 .port-chip {
@@ -386,7 +453,8 @@ button svg {
 
   .shell-header,
   .workspace,
-  .button-row {
+  .button-row,
+  .manual-button-row {
     grid-template-columns: 1fr;
   }
 

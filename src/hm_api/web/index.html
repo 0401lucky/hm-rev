@@ -66,14 +66,35 @@
         </div>
 
         <div class="manual-import">
+          <div id="callbackHint" class="callback-hint">
+            <i data-lucide="radio-tower"></i>
+            <div>
+              <strong id="callbackHintTitle">本机回调桥</strong>
+              <span id="callbackHintBody">云端部署时先复制并运行桥接命令，再点授权登录。</span>
+            </div>
+          </div>
+
+          <div class="bridge-command">
+            <code id="bridgeCommand">uv run hm-api bridge --target ...</code>
+            <button id="copyBridgeButton" class="icon-button" type="button" title="复制桥接命令">
+              <i data-lucide="terminal"></i>
+            </button>
+          </div>
+
           <div class="field">
             <label for="manualAuthInput">回调 URL / tempToken</label>
             <textarea id="manualAuthInput" rows="3" spellcheck="false" placeholder="http://127.0.0.1:8000/callback?tempToken=..."></textarea>
           </div>
-          <button id="importAuthButton" class="secondary-button wide-button" type="button">
-            <i data-lucide="upload-cloud"></i>
-            导入授权
-          </button>
+          <div class="manual-button-row">
+            <button id="pasteAuthButton" class="secondary-button" type="button">
+              <i data-lucide="clipboard-paste"></i>
+              读取剪贴板
+            </button>
+            <button id="importAuthButton" class="secondary-button" type="button">
+              <i data-lucide="upload-cloud"></i>
+              导入授权
+            </button>
+          </div>
         </div>
       </article>
 

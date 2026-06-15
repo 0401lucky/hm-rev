@@ -113,6 +113,12 @@ def _parse_callback(path: str, body: bytes) -> dict[str, str | None]:
     }
 
 
+def parse_callback_request(data: bytes) -> tuple[str, dict[str, str | None]]:
+    """解析 DevEco 本机回调请求，供 CLI 登录和云端桥接共用。"""
+    _method, path, body = _parse_request(data)
+    return urlparse(path).path, _parse_callback(path, body)
+
+
 async def _callback_handler(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
@@ -126,17 +132,15 @@ async def _callback_handler(
         await writer.wait_closed()
         return
 
-    _method, path, body = _parse_request(data)
-    parsed = urlparse(path)
+    callback_path, params = parse_callback_request(data)
 
-    if parsed.path != "/callback":
+    if callback_path != "/callback":
         writer.write(b"HTTP/1.1 204 No Content\r\n\r\n")
         await writer.drain()
         writer.close()
         await writer.wait_closed()
         return
 
-    params = _parse_callback(path, body)
     code = params["code"]
     temp_token = params["tempToken"]
     site_id = params["siteId"]
