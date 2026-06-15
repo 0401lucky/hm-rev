@@ -8,7 +8,7 @@ import uuid
 from html import escape
 from pathlib import Path
 from typing import AsyncGenerator
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -116,6 +116,33 @@ def _auth_result_page(title: str, message: str, ok: bool) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+def _extract_manual_auth_params(value: str) -> dict[str, str | None]:
+    text = value.strip()
+    if not text:
+        return {"code": None, "tempToken": None, "siteId": None, "quit": None}
+
+    parsed = urlparse(text)
+    query = parsed.query
+    raw_query = query or text.lstrip("?")
+    params = parse_qs(raw_query)
+
+    def _first(key: str) -> str | None:
+        values = params.get(key)
+        return values[0] if values else None
+
+    known_keys = {"code", "tempToken", "siteId", "quit"}
+    temp_token = _first("tempToken")
+    if not temp_token and not known_keys.intersection(params):
+        temp_token = text
+
+    return {
+        "code": _first("code"),
+        "tempToken": temp_token,
+        "siteId": _first("siteId"),
+        "quit": _first("quit"),
+    }
+
+
 def _current_access_token() -> str | None:
     data = load_auth_data()
     deveco = data.get("deveco", {})
@@ -193,6 +220,69 @@ def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
                 "login_url": build_login_url(callback_port, secret),
                 "callback_port": callback_port,
                 "expires_in": 600,
+            }
+        )
+
+    @app.post("/api/auth/import", response_model=None)
+    async def import_auth(request: Request) -> JSONResponse:
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        raw_value = body.get("callback") if isinstance(body, dict) else None
+        if not isinstance(raw_value, str) or not raw_value.strip():
+            return JSONResponse(
+                {"error": "请粘贴回调 URL 或 tempToken"},
+                status_code=400,
+            )
+
+        override_proxy = body.get("proxy") if isinstance(body, dict) else None
+        if not isinstance(override_proxy, str):
+            override_proxy = None
+
+        params = _extract_manual_auth_params(raw_value)
+        code = params["code"]
+        temp_token = params["tempToken"]
+        site_id = params["siteId"]
+        quit_value = params["quit"]
+        expected_code = auth_state.get("secret")
+        created_at = auth_state.get("created_at")
+
+        if quit_value in ("true", "access_denied"):
+            return JSONResponse({"error": "当前账号没有完成授权"}, status_code=400)
+        if not temp_token:
+            return JSONResponse({"error": "未找到 tempToken"}, status_code=400)
+        if site_id and site_id != "1":
+            return JSONResponse({"error": "当前仅支持中国站账号"}, status_code=400)
+        if (
+            code
+            and isinstance(expected_code, str)
+            and expected_code
+            and isinstance(created_at, (int, float))
+            and time.time() - created_at <= 600
+            and code != expected_code
+        ):
+            return JSONResponse({"error": "回调校验未通过"}, status_code=400)
+
+        try:
+            state_proxy = override_proxy or auth_state.get("proxy")
+            proxy_value = (
+                state_proxy if isinstance(state_proxy, str) and state_proxy else None
+            )
+            user_info = await exchange_temp_token(temp_token, proxy=proxy_value)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        auth_state["secret"] = None
+        return JSONResponse(
+            {
+                "success": True,
+                "user": {
+                    "user_id": user_info.user_id,
+                    "user_name": user_info.user_name,
+                },
             }
         )
 

@@ -64,6 +64,17 @@
             复制 API 地址
           </button>
         </div>
+
+        <div class="manual-import">
+          <div class="field">
+            <label for="manualAuthInput">回调 URL / tempToken</label>
+            <textarea id="manualAuthInput" rows="3" spellcheck="false" placeholder="http://127.0.0.1:8000/callback?tempToken=..."></textarea>
+          </div>
+          <button id="importAuthButton" class="secondary-button wide-button" type="button">
+            <i data-lucide="upload-cloud"></i>
+            导入授权
+          </button>
+        </div>
       </article>
 
       <article class="panel service-panel">

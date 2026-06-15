@@ -5,7 +5,9 @@ const keyStatus = document.querySelector("#keyStatus");
 const credentialStatus = document.querySelector("#credentialStatus");
 const portChip = document.querySelector("#portChip");
 const proxyInput = document.querySelector("#proxyInput");
+const manualAuthInput = document.querySelector("#manualAuthInput");
 const loginButton = document.querySelector("#loginButton");
+const importAuthButton = document.querySelector("#importAuthButton");
 const refreshButton = document.querySelector("#refreshButton");
 const copyEndpointButton = document.querySelector("#copyEndpointButton");
 const toast = document.querySelector("#toast");
@@ -94,6 +96,40 @@ async function startLogin() {
   }
 }
 
+async function importManualAuth() {
+  const callback = manualAuthInput.value.trim();
+  if (!callback) {
+    showToast("请粘贴回调 URL 或 tempToken");
+    manualAuthInput.focus();
+    return;
+  }
+
+  importAuthButton.disabled = true;
+  const proxy = proxyInput.value.trim();
+
+  try {
+    const response = await fetch("/api/auth/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(proxy ? { callback, proxy } : { callback }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+
+    manualAuthInput.value = "";
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+    await refreshStatus();
+    showToast("授权已导入");
+  } catch (error) {
+    showToast(error.message || "导入失败");
+  } finally {
+    importAuthButton.disabled = false;
+  }
+}
+
 async function copyEndpoint() {
   const value = endpointBase();
   try {
@@ -106,6 +142,7 @@ async function copyEndpoint() {
 }
 
 loginButton.addEventListener("click", startLogin);
+importAuthButton.addEventListener("click", importManualAuth);
 refreshButton.addEventListener("click", refreshStatus);
 copyEndpointButton.addEventListener("click", copyEndpoint);
 

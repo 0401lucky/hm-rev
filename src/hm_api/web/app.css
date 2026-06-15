@@ -224,17 +224,29 @@ button svg {
   margin-bottom: 22px;
 }
 
-.field input {
+.field input,
+.field textarea {
   width: 100%;
-  min-height: 46px;
   border: 1px solid var(--line);
   background: #fbfcf8;
   color: var(--ink);
-  padding: 0 14px;
   outline: none;
 }
 
-.field input:focus {
+.field input {
+  min-height: 46px;
+  padding: 0 14px;
+}
+
+.field textarea {
+  min-height: 94px;
+  resize: vertical;
+  padding: 12px 14px;
+  line-height: 1.5;
+}
+
+.field input:focus,
+.field textarea:focus {
   border-color: var(--green);
   box-shadow: 0 0 0 3px rgba(16, 124, 65, .13);
 }
@@ -271,6 +283,20 @@ button svg {
   border-color: var(--line);
   background: #fbfcf8;
   color: var(--ink);
+}
+
+.manual-import {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+
+.manual-import .field {
+  margin-bottom: 12px;
+}
+
+.wide-button {
+  width: 100%;
 }
 
 .port-chip {

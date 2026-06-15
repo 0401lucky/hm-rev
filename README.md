@@ -69,6 +69,28 @@ port, such as `8080:8000`, open `http://localhost:8080` for login.
 
 ---
 
+## ☁️ Zeabur
+
+Deploy this repository with the Dockerfile, expose port `8000`, and set:
+
+```env
+HM_API_KEY=your-secret-key
+HM_PROXY=
+```
+
+Add a persistent volume at:
+
+```text
+/app/cred
+```
+
+The volume keeps encrypted credentials across restarts and redeploys. If DevEco
+OAuth redirects to a local callback that cannot be opened from Zeabur, copy the
+failed callback URL or only its `tempToken`, paste it into `回调 URL / tempToken`
+on the web panel, then click `导入授权`.
+
+---
+
 ## 📖 Commands
 
 <div align="center">
