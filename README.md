@@ -143,4 +143,6 @@ See [LICENSE](LICENSE) for full terms.
 
 Made with 💜 by <a href="https://github.com/CuzTeam">CuzTeam</a>
 
+and Thanks to the Linux.do community
+
 </div>
