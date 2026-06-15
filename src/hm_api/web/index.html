@@ -27,6 +27,60 @@
       </div>
     </header>
 
+    <section class="metrics-grid" aria-label="调用统计">
+      <article class="metric-tile metric-primary">
+        <div>
+          <p class="eyebrow">Requests</p>
+          <strong id="totalCalls">0</strong>
+        </div>
+        <i data-lucide="activity"></i>
+      </article>
+      <article class="metric-tile">
+        <div>
+          <p class="eyebrow">Tokens</p>
+          <strong id="totalTokens">0</strong>
+        </div>
+        <i data-lucide="hash"></i>
+      </article>
+      <article class="metric-tile">
+        <div>
+          <p class="eyebrow">Success</p>
+          <strong id="successRate">--</strong>
+        </div>
+        <i data-lucide="badge-check"></i>
+      </article>
+      <article class="metric-tile">
+        <div>
+          <p class="eyebrow">Streaming</p>
+          <strong id="streamCalls">0</strong>
+        </div>
+        <i data-lucide="radio"></i>
+      </article>
+    </section>
+
+    <section class="analytics-grid" aria-label="统计图表">
+      <article class="panel chart-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Daily Usage</p>
+            <h2>调用趋势</h2>
+          </div>
+          <span id="statsUpdatedAt" class="panel-meta">--</span>
+        </div>
+        <div id="dailyChart" class="usage-bars"></div>
+      </article>
+
+      <article class="panel models-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Models</p>
+            <h2>模型分布</h2>
+          </div>
+        </div>
+        <div id="modelList" class="model-list"></div>
+      </article>
+    </section>
+
     <section class="workspace" aria-label="控制台">
       <article class="panel auth-panel">
         <div class="panel-heading">
@@ -129,6 +183,16 @@
           <span></span>
         </div>
       </article>
+    </section>
+
+    <section class="panel recent-panel" aria-label="最近请求">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Recent</p>
+          <h2>最近请求</h2>
+        </div>
+      </div>
+      <div id="recentCalls" class="recent-list"></div>
     </section>
   </main>
 

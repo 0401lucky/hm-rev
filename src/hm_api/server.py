@@ -29,6 +29,7 @@ from .login import (
     load_session,
     make_login_secret,
 )
+from .stats import extract_usage, get_stats_snapshot, record_chat_completion
 
 
 TARGET_BASE = f"{DEVECO_BASE_URL}/sse/codeGenie/maas"
@@ -150,6 +151,30 @@ def _current_access_token() -> str | None:
     return access if access else None
 
 
+def _chat_model(body_json: dict) -> str:
+    model = body_json.get("model")
+    return model if isinstance(model, str) and model else "unknown"
+
+
+def _duration_ms(start: float) -> int:
+    return int((time.perf_counter() - start) * 1000)
+
+
+def _usage_from_sse_line(line: str) -> dict[str, int] | None:
+    stripped = line.strip()
+    if not stripped.startswith("data:"):
+        return None
+    data = stripped[5:].strip()
+    if not data or data == "[DONE]":
+        return None
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    usage = extract_usage(payload)
+    return usage if usage["total_tokens"] > 0 else None
+
+
 def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
     app = FastAPI(title="hm-api", version="0.1.0")
     auth_state: dict[str, str | float | None] = {
@@ -194,6 +219,10 @@ def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
                 "api_key_enabled": api_key is not None,
             }
         )
+
+    @app.get("/api/stats", response_model=None)
+    async def stats_snapshot() -> JSONResponse:
+        return JSONResponse(get_stats_snapshot())
 
     @app.post("/api/auth/start", response_model=None)
     async def start_auth(request: Request) -> JSONResponse:
@@ -363,8 +392,16 @@ def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
 
     @app.post("/v1/chat/completions", response_model=None)
     async def chat_completions(request: Request) -> StreamingResponse | JSONResponse:
+        started_at = time.perf_counter()
         token = _current_access_token()
         if not token:
+            record_chat_completion(
+                model="unknown",
+                stream=False,
+                status_code=401,
+                duration_ms=_duration_ms(started_at),
+                error="Not logged in",
+            )
             raise HTTPException(status_code=401, detail="Not logged in")
 
         body_bytes = await request.body()
@@ -373,8 +410,16 @@ def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
         try:
             body_json = json.loads(body_bytes)
         except json.JSONDecodeError:
+            record_chat_completion(
+                model="unknown",
+                stream=False,
+                status_code=400,
+                duration_ms=_duration_ms(started_at),
+                error="Invalid JSON body",
+            )
             raise HTTPException(status_code=400, detail="Invalid JSON body")
 
+        model = _chat_model(body_json)
         stream = bool(body_json.get("stream"))
         target_path = "v2/chat/completions"
         if not stream:
@@ -411,20 +456,55 @@ def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
         if stream:
 
             async def streamer() -> AsyncGenerator[bytes, None]:
-                async with client.stream(
-                    "POST", url, headers=upstream_headers, content=body_bytes
-                ) as upstream_resp:
-                    if upstream_resp.status_code != 200:
-                        text = await upstream_resp.aread()
-                        yield json.dumps(
-                            {
-                                "error": text.decode("utf-8", errors="replace")
+                usage: dict[str, int] | None = None
+                line_buffer = ""
+                recorded = False
+                try:
+                    async with client.stream(
+                        "POST", url, headers=upstream_headers, content=body_bytes
+                    ) as upstream_resp:
+                        if upstream_resp.status_code != 200:
+                            text = await upstream_resp.aread()
+                            error_text = (
+                                text.decode("utf-8", errors="replace")
                                 or "Upstream error"
-                            }
-                        ).encode()
-                        return
-                    async for chunk in upstream_resp.aiter_bytes():
-                        yield chunk
+                            )
+                            record_chat_completion(
+                                model=model,
+                                stream=True,
+                                status_code=upstream_resp.status_code,
+                                duration_ms=_duration_ms(started_at),
+                                error=error_text,
+                            )
+                            recorded = True
+                            yield json.dumps({"error": error_text}).encode()
+                            return
+                        async for chunk in upstream_resp.aiter_bytes():
+                            line_buffer += chunk.decode("utf-8", errors="ignore")
+                            while "\n" in line_buffer:
+                                line, line_buffer = line_buffer.split("\n", 1)
+                                parsed_usage = _usage_from_sse_line(line)
+                                if parsed_usage:
+                                    usage = parsed_usage
+                            yield chunk
+                    record_chat_completion(
+                        model=model,
+                        stream=True,
+                        status_code=200,
+                        duration_ms=_duration_ms(started_at),
+                        usage=usage,
+                    )
+                    recorded = True
+                finally:
+                    if not recorded:
+                        record_chat_completion(
+                            model=model,
+                            stream=True,
+                            status_code=499,
+                            duration_ms=_duration_ms(started_at),
+                            usage=usage,
+                            error="Stream closed before completion",
+                        )
 
             return StreamingResponse(
                 streamer(),
@@ -438,17 +518,36 @@ def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
         )
 
         if upstream_resp.status_code != 200:
+            record_chat_completion(
+                model=model,
+                stream=False,
+                status_code=upstream_resp.status_code,
+                duration_ms=_duration_ms(started_at),
+                error=upstream_resp.text or "Upstream error",
+            )
             return JSONResponse(
                 content={"error": upstream_resp.text or "Upstream error"},
                 status_code=upstream_resp.status_code,
             )
 
+        content_type = upstream_resp.headers.get("content-type", "")
+        if content_type.startswith("application/json"):
+            response_payload = upstream_resp.json()
+            response_content = response_payload
+        else:
+            response_payload = None
+            response_content = {"data": upstream_resp.text}
+
+        record_chat_completion(
+            model=model,
+            stream=False,
+            status_code=upstream_resp.status_code,
+            duration_ms=_duration_ms(started_at),
+            usage=extract_usage(response_payload),
+        )
+
         return JSONResponse(
-            content=upstream_resp.json()
-            if upstream_resp.headers.get("content-type", "").startswith(
-                "application/json"
-            )
-            else {"data": upstream_resp.text},
+            content=response_content,
             status_code=upstream_resp.status_code,
         )
 

@@ -131,10 +131,63 @@ h2 {
   background: var(--red);
 }
 
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.metric-tile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 118px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .93);
+  padding: 20px;
+  box-shadow: 0 18px 60px rgba(21, 31, 23, .08);
+}
+
+.metric-primary {
+  background: var(--ink);
+  color: #fff;
+}
+
+.metric-primary .eyebrow {
+  color: #9dd7b4;
+}
+
+.metric-tile strong {
+  display: block;
+  font-size: 36px;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.metric-tile svg {
+  width: 28px;
+  height: 28px;
+  color: var(--blue);
+}
+
+.metric-primary svg {
+  color: #9dd7b4;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr);
   gap: 18px;
+  margin-bottom: 18px;
 }
 
 .panel {
@@ -154,12 +207,154 @@ h2 {
   padding: 28px;
 }
 
+.chart-panel,
+.models-panel,
+.recent-panel {
+  padding: 28px;
+}
+
 .panel-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 32px;
+}
+
+.panel-meta {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.usage-bars {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(18px, 1fr));
+  align-items: end;
+  gap: 10px;
+  min-height: 230px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.usage-bar {
+  display: grid;
+  align-content: end;
+  gap: 8px;
+  min-width: 0;
+  height: 220px;
+}
+
+.usage-bar-track {
+  position: relative;
+  height: 180px;
+  border: 1px solid var(--line);
+  background: #f8faf4;
+}
+
+.usage-bar-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  min-height: 4px;
+  background: var(--green);
+}
+
+.usage-bar:nth-child(3n) .usage-bar-fill {
+  background: var(--blue);
+}
+
+.usage-bar:nth-child(4n) .usage-bar-fill {
+  background: var(--yellow);
+}
+
+.usage-bar-label,
+.usage-bar-value {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.model-list,
+.recent-list {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.model-name,
+.recent-model {
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-meta,
+.recent-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.model-bar {
+  grid-column: 1 / -1;
+  height: 8px;
+  background: #eef2e9;
+}
+
+.model-bar span {
+  display: block;
+  height: 100%;
+  background: var(--blue);
+}
+
+.recent-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px 108px 92px;
+  gap: 12px;
+  align-items: center;
+  min-height: 52px;
+  border-top: 1px solid #edf1e8;
+}
+
+.recent-row:first-child {
+  border-top: 0;
+}
+
+.recent-status {
+  font-weight: 800;
+}
+
+.recent-status.ok {
+  color: var(--green);
+}
+
+.recent-status.fail {
+  color: var(--red);
+}
+
+.empty-state {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.usage-bars .empty-state {
+  grid-column: 1 / -1;
 }
 
 .icon-button {
@@ -452,6 +647,8 @@ button svg {
   }
 
   .shell-header,
+  .metrics-grid,
+  .analytics-grid,
   .workspace,
   .button-row,
   .manual-button-row {
@@ -481,7 +678,33 @@ button svg {
   }
 
   .auth-panel,
-  .service-panel {
+  .service-panel,
+  .chart-panel,
+  .models-panel,
+  .recent-panel {
     padding: 22px;
+  }
+
+  .metric-tile {
+    min-height: 92px;
+  }
+
+  .metric-tile strong {
+    font-size: 30px;
+  }
+
+  .usage-bars {
+    grid-template-columns: repeat(7, minmax(20px, 1fr));
+    overflow-x: auto;
+  }
+
+  .recent-row {
+    grid-template-columns: 1fr 74px;
+    gap: 6px 10px;
+    padding: 10px 0;
+  }
+
+  .recent-meta:last-child {
+    grid-column: 1 / -1;
   }
 }

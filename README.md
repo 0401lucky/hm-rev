@@ -20,7 +20,7 @@
 ## ✨ Features
 
 - **OpenAI-compatible** — `/v1/models` and `/v1/chat/completions`
-- **Web panel** — authorize DevEco login from the browser dashboard
+- **Web dashboard** — authorize login and monitor requests, tokens, models, and recent calls
 - **Streaming & non-streaming** — automatic SSE forwarding and `/no-stream` fallback
 - **Built-in auth** — optional `--key` API key protection
 - **Proxy support** — pass upstream HTTP/HTTPS proxy to `httpx`
@@ -147,7 +147,8 @@ curl http://localhost:8000/v1/chat/completions \
 
 ## 🛡️ Credentials
 
-All authentication data is encrypted and stored locally under `./cred`.
+Authentication data and usage statistics are stored locally under `./cred`.
+Tokens are encrypted; usage statistics are stored in `cred/stats.json`.
 
 <div align="center">
 

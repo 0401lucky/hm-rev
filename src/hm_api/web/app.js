@@ -4,6 +4,14 @@ const endpointText = document.querySelector("#endpointText");
 const keyStatus = document.querySelector("#keyStatus");
 const credentialStatus = document.querySelector("#credentialStatus");
 const portChip = document.querySelector("#portChip");
+const totalCalls = document.querySelector("#totalCalls");
+const totalTokens = document.querySelector("#totalTokens");
+const successRate = document.querySelector("#successRate");
+const streamCalls = document.querySelector("#streamCalls");
+const statsUpdatedAt = document.querySelector("#statsUpdatedAt");
+const dailyChart = document.querySelector("#dailyChart");
+const modelList = document.querySelector("#modelList");
+const recentCalls = document.querySelector("#recentCalls");
 const proxyInput = document.querySelector("#proxyInput");
 const manualAuthInput = document.querySelector("#manualAuthInput");
 const callbackHint = document.querySelector("#callbackHint");
@@ -45,6 +53,47 @@ function endpointBase() {
   return `${window.location.origin}/v1`;
 }
 
+function formatNumber(value) {
+  return new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function formatPercent(success, total) {
+  if (!total) {
+    return "--";
+  }
+  return `${Math.round((success / total) * 100)}%`;
+}
+
+function formatTime(value) {
+  if (!value) {
+    return "--";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function compactDate(value) {
+  const parts = String(value || "").split("-");
+  return parts.length === 3 ? `${parts[1]}/${parts[2]}` : "--";
+}
+
+function renderEmpty(target, text) {
+  target.innerHTML = `<div class="empty-state">${text}</div>`;
+}
+
 function bridgeCommandText() {
   return `uv run hm-api bridge --target ${window.location.origin} --port 8000`;
 }
@@ -82,6 +131,105 @@ async function refreshStatus() {
     accountName.textContent = "服务不可用";
     credentialStatus.textContent = "检测失败";
     showToast("状态刷新失败");
+  }
+}
+
+function renderDailyChart(rows) {
+  if (!rows.length) {
+    renderEmpty(dailyChart, "暂无调用数据");
+    return;
+  }
+
+  const maxTokens = Math.max(...rows.map((row) => row.total_tokens || 0), 1);
+  dailyChart.innerHTML = rows
+    .map((row) => {
+      const height = Math.max(Math.round(((row.total_tokens || 0) / maxTokens) * 100), 3);
+      return `
+        <div class="usage-bar" title="${compactDate(row.date)} · ${formatNumber(row.requests)} 次 · ${formatNumber(row.total_tokens)} tokens">
+          <div class="usage-bar-track">
+            <span class="usage-bar-fill" style="height:${height}%"></span>
+          </div>
+          <span class="usage-bar-value">${formatNumber(row.requests)}</span>
+          <span class="usage-bar-label">${compactDate(row.date)}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderModels(rows) {
+  if (!rows.length) {
+    renderEmpty(modelList, "暂无模型数据");
+    return;
+  }
+
+  const maxTokens = Math.max(...rows.map((row) => row.total_tokens || 0), 1);
+  modelList.innerHTML = rows
+    .slice(0, 8)
+    .map((row) => {
+      const width = Math.max(Math.round(((row.total_tokens || 0) / maxTokens) * 100), 4);
+      return `
+        <div class="model-row">
+          <div>
+            <div class="model-name">${escapeHtml(row.model)}</div>
+            <div class="model-meta">${formatNumber(row.requests)} 次 · ${formatNumber(row.total_tokens)} tokens</div>
+          </div>
+          <div class="model-meta">${formatPercent(row.success, row.requests)}</div>
+          <div class="model-bar"><span style="width:${width}%"></span></div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderRecent(rows) {
+  if (!rows.length) {
+    renderEmpty(recentCalls, "暂无请求记录");
+    return;
+  }
+
+  recentCalls.innerHTML = rows
+    .slice(0, 12)
+    .map((row) => {
+      const statusClass = row.success ? "ok" : "fail";
+      const statusText = row.success ? "成功" : `失败 ${row.status_code || ""}`;
+      const mode = row.stream ? "流式" : "非流式";
+      return `
+        <div class="recent-row">
+          <div>
+            <div class="recent-model">${escapeHtml(row.model || "unknown")}</div>
+            <div class="recent-meta">${formatTime(row.time)} · ${mode}</div>
+          </div>
+          <div class="recent-status ${statusClass}">${statusText}</div>
+          <div class="recent-meta">${formatNumber(row.total_tokens)} tokens</div>
+          <div class="recent-meta">${formatNumber(row.duration_ms)} ms</div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+async function refreshStats() {
+  try {
+    const response = await fetch("/api/stats");
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const totals = data.totals || {};
+    totalCalls.textContent = formatNumber(totals.requests);
+    totalTokens.textContent = formatNumber(totals.total_tokens);
+    successRate.textContent = formatPercent(totals.success, totals.requests);
+    streamCalls.textContent = formatNumber(totals.stream);
+    statsUpdatedAt.textContent = data.updated_at ? `更新 ${formatTime(data.updated_at)}` : "未更新";
+    renderDailyChart(data.daily || []);
+    renderModels(data.models || []);
+    renderRecent(data.recent || []);
+  } catch (error) {
+    statsUpdatedAt.textContent = "统计不可用";
+    renderEmpty(dailyChart, "统计加载失败");
+    renderEmpty(modelList, "统计加载失败");
+    renderEmpty(recentCalls, "统计加载失败");
   }
 }
 
@@ -158,6 +306,7 @@ async function importManualAuth() {
     window.clearInterval(pollTimer);
     pollTimer = null;
     await refreshStatus();
+    await refreshStats();
     setCallbackHint("授权已导入", "云端凭据已经写入持久化目录。", false);
     showToast("授权已导入");
   } catch (error) {
@@ -200,4 +349,6 @@ window.addEventListener("load", () => {
   bridgeCommand.textContent = bridgeCommandText();
   renderIcons();
   refreshStatus();
+  refreshStats();
+  window.setInterval(refreshStats, 15000);
 });
