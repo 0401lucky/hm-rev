@@ -7,7 +7,7 @@ import time
 import uuid
 from html import escape
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -28,12 +28,14 @@ from .login import (
     is_logged_in,
     load_session,
     make_login_secret,
+    refresh_access_token,
 )
 from .stats import extract_usage, get_stats_snapshot, record_chat_completion
 
 
 TARGET_BASE = f"{DEVECO_BASE_URL}/sse/codeGenie/maas"
 WEB_DIR = Path(__file__).resolve().parent / "web"
+ACCESS_TOKEN_ERROR_CODES = {4016}
 
 
 def _public_session(session: dict | None) -> dict | None:
@@ -149,6 +151,49 @@ def _current_access_token() -> str | None:
     deveco = data.get("deveco", {})
     access = deveco.get("access")
     return access if access else None
+
+
+def _business_error(payload: Any) -> tuple[int | None, str] | None:
+    if not isinstance(payload, dict) or "errorCode" not in payload:
+        return None
+    raw_code = payload.get("errorCode")
+    code = raw_code if isinstance(raw_code, int) else None
+    message = payload.get("errorMsg") or payload.get("message") or "Upstream error"
+    return code, str(message)
+
+
+def _business_error_status(error: tuple[int | None, str]) -> int:
+    code, _message = error
+    if code in ACCESS_TOKEN_ERROR_CODES:
+        return 401
+    return 502
+
+
+def _openai_error_content(error: tuple[int | None, str]) -> dict[str, dict[str, Any]]:
+    code, message = error
+    return {
+        "error": {
+            "message": message,
+            "type": "upstream_error",
+            "code": code,
+        }
+    }
+
+
+def _sse_error(error: tuple[int | None, str]) -> bytes:
+    content = _openai_error_content(error)
+    data = json.dumps(content, ensure_ascii=False)
+    return f"data: {data}\n\ndata: [DONE]\n\n".encode("utf-8")
+
+
+def _json_payload(resp: httpx.Response) -> Any:
+    content_type = resp.headers.get("content-type", "")
+    if not content_type.startswith("application/json"):
+        return None
+    try:
+        return resp.json()
+    except json.JSONDecodeError:
+        return None
 
 
 def _chat_model(body_json: dict) -> str:
@@ -370,16 +415,34 @@ def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
         token = _current_access_token()
         if not token:
             raise HTTPException(status_code=401, detail="Not logged in")
-        resp = await client.get(
-            f"{DEVECO_BASE_URL}/codeGenie/modelConfig?localVersion=0&pluginVersion=CLI.0.1.0",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-        )
+
+        async def request_models(access_token: str) -> httpx.Response:
+            return await client.get(
+                f"{DEVECO_BASE_URL}/codeGenie/modelConfig?localVersion=0&pluginVersion=CLI.0.1.0",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+            )
+
+        resp = await request_models(token)
         if resp.status_code != 200:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
         data = resp.json()
+        error = _business_error(data)
+        if error and error[0] in ACCESS_TOKEN_ERROR_CODES:
+            refreshed_token = await refresh_access_token(proxy=proxy)
+            if refreshed_token:
+                resp = await request_models(refreshed_token)
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=resp.status_code, detail=resp.text)
+                data = resp.json()
+                error = _business_error(data)
+        if error:
+            raise HTTPException(
+                status_code=_business_error_status(error),
+                detail=error[1],
+            )
         models: list[dict] = []
         for group in data.get("body", {}).get("inner_models", []):
             for cfg in group.get("model_configs", []):
@@ -453,48 +516,102 @@ def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
                 continue
             upstream_headers[key] = value
 
+        def headers_with_token(access_token: str) -> dict[str, str]:
+            headers = dict(upstream_headers)
+            headers["Authorization"] = f"Bearer {access_token}"
+            return headers
+
         if stream:
 
             async def streamer() -> AsyncGenerator[bytes, None]:
+                access_token = token
                 usage: dict[str, int] | None = None
                 line_buffer = ""
                 recorded = False
                 try:
-                    async with client.stream(
-                        "POST", url, headers=upstream_headers, content=body_bytes
-                    ) as upstream_resp:
-                        if upstream_resp.status_code != 200:
-                            text = await upstream_resp.aread()
-                            error_text = (
-                                text.decode("utf-8", errors="replace")
-                                or "Upstream error"
+                    for attempt in range(2):
+                        async with client.stream(
+                            "POST",
+                            url,
+                            headers=headers_with_token(access_token),
+                            content=body_bytes,
+                        ) as upstream_resp:
+                            if upstream_resp.status_code != 200:
+                                text = await upstream_resp.aread()
+                                error_text = (
+                                    text.decode("utf-8", errors="replace")
+                                    or "Upstream error"
+                                )
+                                error = (upstream_resp.status_code, error_text)
+                                record_chat_completion(
+                                    model=model,
+                                    stream=True,
+                                    status_code=upstream_resp.status_code,
+                                    duration_ms=_duration_ms(started_at),
+                                    error=error_text,
+                                )
+                                recorded = True
+                                yield _sse_error(error)
+                                return
+
+                            content_type = upstream_resp.headers.get(
+                                "content-type", ""
                             )
+                            if not content_type.startswith("text/event-stream"):
+                                raw_body = await upstream_resp.aread()
+                                error_payload = None
+                                if content_type.startswith("application/json"):
+                                    try:
+                                        error_payload = json.loads(raw_body)
+                                    except json.JSONDecodeError:
+                                        error_payload = None
+                                error = _business_error(error_payload)
+                                if (
+                                    error
+                                    and error[0] in ACCESS_TOKEN_ERROR_CODES
+                                    and attempt == 0
+                                ):
+                                    refreshed_token = await refresh_access_token(
+                                        proxy=proxy
+                                    )
+                                    if refreshed_token:
+                                        access_token = refreshed_token
+                                        continue
+                                if not error:
+                                    text = raw_body.decode(
+                                        "utf-8", errors="replace"
+                                    ) or "Upstream error"
+                                    error = (None, text)
+                                status_code = _business_error_status(error)
+                                message = error[1]
+                                record_chat_completion(
+                                    model=model,
+                                    stream=True,
+                                    status_code=status_code,
+                                    duration_ms=_duration_ms(started_at),
+                                    error=message,
+                                )
+                                recorded = True
+                                yield _sse_error(error)
+                                return
+
+                            async for chunk in upstream_resp.aiter_bytes():
+                                line_buffer += chunk.decode("utf-8", errors="ignore")
+                                while "\n" in line_buffer:
+                                    line, line_buffer = line_buffer.split("\n", 1)
+                                    parsed_usage = _usage_from_sse_line(line)
+                                    if parsed_usage:
+                                        usage = parsed_usage
+                                yield chunk
                             record_chat_completion(
                                 model=model,
                                 stream=True,
-                                status_code=upstream_resp.status_code,
+                                status_code=200,
                                 duration_ms=_duration_ms(started_at),
-                                error=error_text,
+                                usage=usage,
                             )
                             recorded = True
-                            yield json.dumps({"error": error_text}).encode()
                             return
-                        async for chunk in upstream_resp.aiter_bytes():
-                            line_buffer += chunk.decode("utf-8", errors="ignore")
-                            while "\n" in line_buffer:
-                                line, line_buffer = line_buffer.split("\n", 1)
-                                parsed_usage = _usage_from_sse_line(line)
-                                if parsed_usage:
-                                    usage = parsed_usage
-                            yield chunk
-                    record_chat_completion(
-                        model=model,
-                        stream=True,
-                        status_code=200,
-                        duration_ms=_duration_ms(started_at),
-                        usage=usage,
-                    )
-                    recorded = True
                 finally:
                     if not recorded:
                         record_chat_completion(
@@ -513,8 +630,9 @@ def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
                 headers={"Cache-Control": "no-cache"},
             )
 
+        access_token = token
         upstream_resp = await client.post(
-            url, headers=upstream_headers, content=body_bytes
+            url, headers=headers_with_token(access_token), content=body_bytes
         )
 
         if upstream_resp.status_code != 200:
@@ -530,12 +648,51 @@ def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
                 status_code=upstream_resp.status_code,
             )
 
-        content_type = upstream_resp.headers.get("content-type", "")
-        if content_type.startswith("application/json"):
-            response_payload = upstream_resp.json()
+        response_payload = _json_payload(upstream_resp)
+        error = _business_error(response_payload)
+        if error and error[0] in ACCESS_TOKEN_ERROR_CODES:
+            refreshed_token = await refresh_access_token(proxy=proxy)
+            if refreshed_token:
+                access_token = refreshed_token
+                upstream_resp = await client.post(
+                    url,
+                    headers=headers_with_token(access_token),
+                    content=body_bytes,
+                )
+
+                if upstream_resp.status_code != 200:
+                    record_chat_completion(
+                        model=model,
+                        stream=False,
+                        status_code=upstream_resp.status_code,
+                        duration_ms=_duration_ms(started_at),
+                        error=upstream_resp.text or "Upstream error",
+                    )
+                    return JSONResponse(
+                        content={"error": upstream_resp.text or "Upstream error"},
+                        status_code=upstream_resp.status_code,
+                    )
+
+                response_payload = _json_payload(upstream_resp)
+                error = _business_error(response_payload)
+
+        if error:
+            status_code = _business_error_status(error)
+            record_chat_completion(
+                model=model,
+                stream=False,
+                status_code=status_code,
+                duration_ms=_duration_ms(started_at),
+                error=error[1],
+            )
+            return JSONResponse(
+                content=_openai_error_content(error),
+                status_code=status_code,
+            )
+
+        if response_payload is not None:
             response_content = response_payload
         else:
-            response_payload = None
             response_content = {"data": upstream_resp.text}
 
         record_chat_completion(

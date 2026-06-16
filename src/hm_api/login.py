@@ -254,12 +254,14 @@ def _load_token() -> str | None:
     return decrypt_value(blob)
 
 
-def _save_access_token(access_token: str, refresh_token: str) -> None:
+def _save_access_token(access_token: str, refresh_token: str | None = None) -> None:
     data = load_auth_data()
+    old_deveco = data.get("deveco", {})
+    old_refresh = old_deveco.get("refresh") if isinstance(old_deveco, dict) else ""
     data["deveco"] = {
         "type": "oauth",
         "access": access_token,
-        "refresh": refresh_token,
+        "refresh": refresh_token or old_refresh or "",
     }
     save_auth_data(data)
 
@@ -311,6 +313,40 @@ async def exchange_temp_token(temp_token: str, proxy: str | None = None) -> User
         _save_access_token(user_info.access_token, user_info.refresh_token)
 
         return user_info
+
+
+async def refresh_access_token(proxy: str | None = None) -> str | None:
+    token = _load_token()
+    if not token:
+        return None
+
+    async with _build_client(proxy, timeout=30.0) as client:
+        info_resp = await client.get(
+            f"{DEVECO_BASE_URL}/{DEVECO_JWT_TOKEN_CHECK_URL}",
+            headers={"refresh": "true", "jwtToken": token},
+        )
+    if info_resp.status_code != 200:
+        return None
+
+    try:
+        info_data = info_resp.json()
+    except json.JSONDecodeError:
+        return None
+
+    user_info = info_data.get("userInfo")
+    if not info_data.get("status") or not isinstance(user_info, dict):
+        return None
+
+    access_token = user_info.get("accessToken")
+    if not isinstance(access_token, str) or not access_token:
+        return None
+
+    refresh_token = user_info.get("refreshToken")
+    _save_access_token(
+        access_token,
+        refresh_token if isinstance(refresh_token, str) and refresh_token else None,
+    )
+    return access_token
 
 
 async def _start_callback_server(
