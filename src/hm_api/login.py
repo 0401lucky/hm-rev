@@ -9,6 +9,7 @@ import os
 import uuid
 import webbrowser
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -26,6 +27,9 @@ from .config import (
     USER_AGENT,
 )
 from .crypto import decrypt_value, encrypt_value, load_auth_data, save_auth_data
+
+AUTH_RETRY_ATTEMPTS = 3
+AUTH_RETRY_STATUSES = {408, 429, 500, 502, 503, 504}
 
 
 @dataclass
@@ -221,6 +225,55 @@ def _build_client(proxy: str | None = None, timeout: float = 30.0) -> httpx.Asyn
     )
 
 
+def _is_retryable_error(exc: Exception) -> bool:
+    return isinstance(
+        exc,
+        (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.PoolTimeout,
+            httpx.ReadError,
+            httpx.RemoteProtocolError,
+            httpx.WriteError,
+        ),
+    )
+
+
+async def _sleep_before_retry(attempt: int) -> None:
+    await asyncio.sleep(min(0.4 * (2**attempt), 2.0))
+
+
+async def _request_with_retries(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    **kwargs: Any,
+) -> httpx.Response:
+    last_exc: Exception | None = None
+    for attempt in range(AUTH_RETRY_ATTEMPTS):
+        try:
+            resp = await client.request(method, url, **kwargs)
+        except Exception as exc:
+            if not _is_retryable_error(exc) or attempt == AUTH_RETRY_ATTEMPTS - 1:
+                raise
+            last_exc = exc
+            await _sleep_before_retry(attempt)
+            continue
+
+        if (
+            resp.status_code in AUTH_RETRY_STATUSES
+            and attempt < AUTH_RETRY_ATTEMPTS - 1
+        ):
+            await resp.aclose()
+            await _sleep_before_retry(attempt)
+            continue
+        return resp
+
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("DevEco auth request retry exhausted")
+
+
 def make_login_secret() -> str:
     return uuid.uuid4().hex.replace("-", "")
 
@@ -271,7 +324,9 @@ async def exchange_temp_token(temp_token: str, proxy: str | None = None) -> User
     actual_temp_token = temp_token.split("&")[0]
 
     async with _build_client(proxy, timeout=30.0) as client:
-        jwt_resp = await client.get(
+        jwt_resp = await _request_with_retries(
+            client,
+            "GET",
             f"{DEVECO_BASE_URL}/{DEVECO_TEMP_TOKEN_CHECK_URL}",
             params={
                 "tempToken": actual_temp_token,
@@ -286,7 +341,9 @@ async def exchange_temp_token(temp_token: str, proxy: str | None = None) -> User
         if len(jwt_token.split(".")) != 3:
             raise ValueError("Invalid JWT format")
 
-        info_resp = await client.get(
+        info_resp = await _request_with_retries(
+            client,
+            "GET",
             f"{DEVECO_BASE_URL}/{DEVECO_JWT_TOKEN_CHECK_URL}",
             headers={"refresh": "false", "jwtToken": jwt_token},
         )
@@ -321,7 +378,9 @@ async def refresh_access_token(proxy: str | None = None) -> str | None:
         return None
 
     async with _build_client(proxy, timeout=30.0) as client:
-        info_resp = await client.get(
+        info_resp = await _request_with_retries(
+            client,
+            "GET",
             f"{DEVECO_BASE_URL}/{DEVECO_JWT_TOKEN_CHECK_URL}",
             headers={"refresh": "true", "jwtToken": token},
         )
