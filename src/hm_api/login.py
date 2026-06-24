@@ -71,10 +71,14 @@ def build_login_url(port: int, client_secret: str) -> str:
 
 def _parse_request(data: bytes) -> tuple[str, str, bytes]:
     """Parse a simple HTTP request; return (method, path, body)."""
+    separator = b"\r\n\r\n"
+    separator_len = len(separator)
     try:
         header_end = data.index(b"\r\n\r\n")
     except ValueError:
-        header_end = data.index(b"\n\n") + 1
+        separator = b"\n\n"
+        separator_len = len(separator)
+        header_end = data.index(separator)
     header_lines = data[:header_end].split(b"\r\n")
     if len(header_lines) == 1:
         header_lines = data[:header_end].split(b"\n")
@@ -93,7 +97,8 @@ def _parse_request(data: bytes) -> tuple[str, str, bytes]:
                 content_length = 0
             break
 
-    body = data[header_end + 4 : header_end + 4 + content_length]
+    body_start = header_end + separator_len
+    body = data[body_start : body_start + content_length]
     return method, path, body
 
 

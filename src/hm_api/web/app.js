@@ -94,8 +94,13 @@ function renderEmpty(target, text) {
   target.innerHTML = `<div class="empty-state">${text}</div>`;
 }
 
-function bridgeCommandText() {
-  return `uv run hm-api bridge --target ${window.location.origin} --port 8000`;
+function callbackPort() {
+  return window.location.port || "8000";
+}
+
+function bridgeCommandText(apiKeyEnabled = false) {
+  const keyPart = apiKeyEnabled ? " --key your-secret-key" : "";
+  return `uv run hm-api bridge --target ${window.location.origin} --port ${callbackPort()}${keyPart}`;
 }
 
 function setCallbackHint(title, body, active = false) {
@@ -120,7 +125,8 @@ async function refreshStatus() {
     endpointText.textContent = endpointBase();
     keyStatus.textContent = data.api_key_enabled ? "已启用" : "未启用";
     credentialStatus.textContent = loggedIn ? "已写入 cred" : "等待授权";
-    portChip.textContent = window.location.port || "80";
+    portChip.textContent = callbackPort();
+    bridgeCommand.textContent = bridgeCommandText(Boolean(data.api_key_enabled));
 
     if (loggedIn && pollTimer) {
       window.clearInterval(pollTimer);

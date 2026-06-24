@@ -102,6 +102,7 @@ async def _bridge_callback_handler(
     *,
     target: str,
     proxy: str | None,
+    key: str | None,
     future: asyncio.Future,
 ) -> None:
     try:
@@ -134,12 +135,14 @@ async def _bridge_callback_handler(
         mounts = {"http://": transport, "https://": transport}
 
     try:
+        headers = {"Authorization": f"Bearer {key}"} if key else None
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(30.0), follow_redirects=True, mounts=mounts
         ) as client:
             resp = await client.post(
                 f"{target.rstrip('/')}/api/auth/import",
                 json={"callback": urlencode(values)},
+                headers=headers,
             )
         if resp.status_code != 200:
             raise RuntimeError(resp.text or f"HTTP {resp.status_code}")
@@ -275,6 +278,13 @@ def bridge(
     proxy: Optional[str] = typer.Option(
         "", "--proxy", help="HTTP/HTTPS proxy for forwarding to the cloud service"
     ),
+    key: Optional[str] = typer.Option(
+        None,
+        "--key",
+        "-k",
+        envvar="HM_API_KEY",
+        help="API key for the target hm-api service",
+    ),
     timeout: int = typer.Option(
         600, "--timeout", help="Bridge timeout in seconds", min=60
     ),
@@ -286,6 +296,7 @@ def bridge(
         raise typer.Exit(1)
 
     proxy = _empty_as_none(proxy)
+    key = _empty_as_none(key)
 
     async def run_bridge() -> None:
         loop = asyncio.get_running_loop()
@@ -299,6 +310,7 @@ def bridge(
                 writer,
                 target=target,
                 proxy=proxy,
+                key=key,
                 future=future,
             )
 
