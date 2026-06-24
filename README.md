@@ -46,6 +46,10 @@ uv run hm-api serve --host 0.0.0.0 --port 8000 --key your-secret-key
 # http://localhost:8000
 ```
 
+When `--key` is set, the OpenAI-compatible `/v1/*` API requires
+`Authorization: Bearer your-secret-key`, and the web panel also asks for the same
+key before showing the dashboard.
+
 > If you prefer not to open the browser automatically, use `uv run hm-api login --no-browser` and follow the printed URL.
 
 ---
@@ -93,6 +97,13 @@ For cloud login, keep a local callback bridge running before clicking
 uv run hm-api bridge --target https://your-app.zeabur.app --port 8000
 ```
 
+If the cloud service is started with `HM_API_KEY`, pass the same key to the
+bridge:
+
+```bash
+uv run hm-api bridge --target https://your-app.zeabur.app --port 8000 --key your-secret-key
+```
+
 DevEco redirects OAuth callbacks to `localhost`. The bridge captures that local
 callback and forwards the token to your Zeabur service. If the failed callback
 URL contains `tempToken`, you can also paste it into `回调 URL / tempToken` and
@@ -108,7 +119,7 @@ click `导入授权`.
 |---------|-------------|
 | `hm-api login [--proxy PROXY] [--no-browser]` | Authenticate with DevEco Code |
 | `hm-api serve [--host HOST] [--port PORT] [--proxy PROXY] [--key KEY]` | Start the API server and web panel |
-| `hm-api bridge --target URL [--port PORT]` | Forward local OAuth callback to a cloud deployment |
+| `hm-api bridge --target URL [--port PORT] [--key KEY]` | Forward local OAuth callback to a cloud deployment |
 | `hm-api status` | Show current login status |
 
 </div>

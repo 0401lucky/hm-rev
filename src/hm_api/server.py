@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 import time
 import uuid
+from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
 from typing import Any, AsyncGenerator
@@ -17,6 +19,7 @@ from fastapi.responses import (
     FileResponse,
     HTMLResponse,
     JSONResponse,
+    RedirectResponse,
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
@@ -41,6 +44,8 @@ UPSTREAM_RETRY_ATTEMPTS = 3
 UPSTREAM_RETRY_STATUSES = {408, 429, 500, 502, 503, 504}
 UPSTREAM_TIMEOUT = httpx.Timeout(connect=15.0, read=600.0, write=60.0, pool=15.0)
 UPSTREAM_ERROR_BODY_LIMIT = 2000
+ADMIN_COOKIE_NAME = "hm_api_admin"
+ADMIN_UNLOCK_PATH = "/api/admin/unlock"
 
 
 def _public_session(session: dict | None) -> dict | None:
@@ -122,6 +127,123 @@ def _auth_result_page(title: str, message: str, ok: bool) -> HTMLResponse:
 </body>
 </html>"""
     return HTMLResponse(html)
+
+
+def _admin_unlock_page(error: str | None = None, status_code: int = 200) -> HTMLResponse:
+    error_block = (
+        f'<p class="error">{escape(error)}</p>'
+        if error
+        else '<p class="hint">请输入启动服务时配置的 API Key。</p>'
+    )
+    html = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hm-api 控制台解锁</title>
+  <style>
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #f3f5f1;
+      color: #171a1f;
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    }}
+    main {{
+      width: min(420px, calc(100vw - 40px));
+      border: 1px solid #d7ddd4;
+      background: #fff;
+      padding: 30px;
+      box-shadow: 0 24px 80px rgba(31, 42, 33, .12);
+    }}
+    .mark {{
+      width: 44px;
+      height: 6px;
+      margin-bottom: 24px;
+      background: #107c41;
+    }}
+    h1 {{
+      margin: 0 0 10px;
+      font-size: 26px;
+      line-height: 1.2;
+    }}
+    p {{
+      margin: 0 0 18px;
+      color: #566057;
+      line-height: 1.7;
+    }}
+    .error {{
+      color: #9f1d20;
+      font-weight: 700;
+    }}
+    label {{
+      display: block;
+      margin-bottom: 8px;
+      color: #343b35;
+      font-size: 14px;
+      font-weight: 700;
+    }}
+    input {{
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #cfd8ce;
+      padding: 12px 14px;
+      font: inherit;
+    }}
+    button {{
+      width: 100%;
+      margin-top: 14px;
+      border: 0;
+      background: #107c41;
+      color: #fff;
+      padding: 12px 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark"></div>
+    <h1>控制台已锁定</h1>
+    {error_block}
+    <form method="post" action="{ADMIN_UNLOCK_PATH}">
+      <label for="key">API Key</label>
+      <input id="key" name="key" type="password" autocomplete="current-password" autofocus>
+      <button type="submit">解锁控制台</button>
+    </form>
+  </main>
+</body>
+</html>"""
+    return HTMLResponse(html, status_code=status_code)
+
+
+def _is_admin_path(path: str) -> bool:
+    return path == "/" or path == "/callback" or path.startswith("/api/")
+
+
+def _constant_time_equal(left: str, right: str) -> bool:
+    return secrets.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
+async def _read_unlock_key(request: Request) -> str:
+    body = await request.body()
+    if not body:
+        return ""
+    content_type = request.headers.get("content-type", "")
+    if content_type.startswith("application/json"):
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            return ""
+        value = payload.get("key") if isinstance(payload, dict) else None
+        return value if isinstance(value, str) else ""
+    parsed = parse_qs(body.decode("utf-8", errors="replace"))
+    values = parsed.get("key")
+    return values[0] if values else ""
 
 
 def _extract_manual_auth_params(value: str) -> dict[str, str | None]:
@@ -305,7 +427,7 @@ async def _request_with_retries(
 
 
 def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
-    app = FastAPI(title="hm-api", version="0.1.0")
+    admin_sessions: set[str] = set()
     auth_state: dict[str, str | float | None] = {
         "secret": None,
         "proxy": proxy,
@@ -323,16 +445,82 @@ def build_app(api_key: str | None = None, proxy: str | None = None) -> FastAPI:
         mounts=mounts,
     )
 
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+        try:
+            yield
+        finally:
+            await client.aclose()
+
+    app = FastAPI(title="hm-api", version="0.1.0", lifespan=lifespan)
+
+    def has_api_key(request: Request) -> bool:
+        if api_key is None:
+            return True
+        auth = request.headers.get("Authorization", "")
+        return auth.startswith("Bearer ") and _constant_time_equal(auth[7:], api_key)
+
+    def has_admin_session(request: Request) -> bool:
+        if api_key is None:
+            return True
+        token = request.cookies.get(ADMIN_COOKIE_NAME)
+        return bool(token and token in admin_sessions)
+
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
-        if api_key is None or not request.url.path.startswith("/v1/"):
+        if api_key is None:
             return await call_next(request)
-        auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer ") or auth[7:] != api_key:
+
+        path = request.url.path
+        if path.startswith("/v1/"):
+            if has_api_key(request):
+                return await call_next(request)
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+        if path == ADMIN_UNLOCK_PATH:
+            return await call_next(request)
+
+        if _is_admin_path(path):
+            if has_api_key(request) or has_admin_session(request):
+                return await call_next(request)
+            if path == "/" and request.method == "GET":
+                return _admin_unlock_page()
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
         return await call_next(request)
 
     app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
+
+    @app.post(ADMIN_UNLOCK_PATH, response_model=None, include_in_schema=False)
+    async def unlock_admin(
+        request: Request,
+    ) -> HTMLResponse | JSONResponse | RedirectResponse:
+        if api_key is None:
+            return JSONResponse({"success": True})
+
+        key = await _read_unlock_key(request)
+        if not _constant_time_equal(key, api_key):
+            if request.headers.get("content-type", "").startswith("application/json"):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return _admin_unlock_page("API Key 不正确", status_code=401)
+
+        session_token = secrets.token_urlsafe(32)
+        admin_sessions.add(session_token)
+
+        if request.headers.get("content-type", "").startswith("application/json"):
+            response: JSONResponse | RedirectResponse = JSONResponse({"success": True})
+        else:
+            response = RedirectResponse("/", status_code=303)
+        response.set_cookie(
+            ADMIN_COOKIE_NAME,
+            session_token,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https"
+            or request.headers.get("x-forwarded-proto") == "https",
+            max_age=60 * 60 * 12,
+        )
+        return response
 
     @app.get("/", response_model=None, include_in_schema=False)
     async def dashboard() -> FileResponse:
